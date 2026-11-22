@@ -1,0 +1,93 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Packages are per target/subtarget, not per device. Add another entry
+        # here when building for a different OpenWrt target (e.g. ramips/mt7621).
+        include:
+          - name: ath79-generic
+            target: ath79
+            subtarget: generic
+    env:
+      OPENWRT_VERSION: "24.10.3"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ca-certificates file gawk gettext git libncurses-dev \
+            libssl-dev python3 rsync unzip wget zlib1g-dev zstd
+
+      - name: Download OpenWrt SDK
+        run: |
+          BASE="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${{ matrix.target }}/${{ matrix.subtarget }}"
+          SDK=$(wget -qO- "$BASE/" | grep -oE 'openwrt-sdk-[^"]*Linux-x86_64\.tar\.zst' | head -n1)
+          test -n "$SDK"
+          echo "Using $SDK"
+          wget -q "$BASE/$SDK"
+          tar --zstd -xf "$SDK"
+          mv "${SDK%.tar.zst}" sdk
+
+      - name: Add package
+        run: |
+          mkdir -p sdk/package
+          cp -r package/aic8800d80 sdk/package/aic8800d80
+
+      - name: Configure
+        run: |
+          cd sdk
+          make defconfig
+          cat >> .config <<'EOF'
+          CONFIG_PACKAGE_kmod-cfg80211=y
+          CONFIG_PACKAGE_kmod-mac80211=y
+          CONFIG_PACKAGE_kmod-usb-core=y
+          CONFIG_PACKAGE_kmod-aic8800d80=m
+          CONFIG_PACKAGE_aic8800d80-firmware=m
+          EOF
+          make defconfig
+
+      - name: Build mac80211 backports
+        run: |
+          cd sdk
+          make package/kernel/mac80211/compile V=s -j"$(nproc)"
+
+      - name: Build AIC8800D80 packages
+        run: |
+          cd sdk
+          make package/aic8800d80/compile V=s -j"$(nproc)"
+
+      - name: Collect packages
+        run: |
+          mkdir -p out
+          find sdk/bin -type f -name '*aic8800*.ipk' -exec cp -v {} out/ \;
+          ls -l out
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: aic8800d80-${{ env.OPENWRT_VERSION }}-${{ matrix.name }}
+          path: out/*.ipk
+          if-no-files-found: error
+
+      - name: Attach packages to release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" out/*.ipk --generate-notes --verify-tag

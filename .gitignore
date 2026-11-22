@@ -1,0 +1,4 @@
+sdk/
+out/
+*.ipk
+*.apk
