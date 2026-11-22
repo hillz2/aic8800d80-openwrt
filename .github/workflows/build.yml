@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      driver_ref:
+        description: "Driver git ref to build (empty = the pinned commit; use legacy-mcu1 for chip_mcu_id=1)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -35,6 +40,30 @@ jobs:
             build-essential ca-certificates file gawk gettext git libncurses-dev \
             libssl-dev python3 rsync unzip wget zlib1g-dev zstd
 
+      - name: Ensure GNU coreutils on PATH
+        run: |
+          # Recent ubuntu-latest images ship uutils coreutils, whose `install`
+          # does not identify as GNU and therefore fails OpenWrt's
+          # prerequisite check. GNU coreutils is still installed under
+          # /usr/bin/gnu*, so expose it as a normal prefix.
+          if install --version 2>/dev/null | grep -q GNU; then
+            echo "host install is already GNU coreutils"
+            exit 0
+          fi
+          sudo apt-get install -y --no-install-recommends gnu-coreutils || true
+          mkdir -p "$HOME/gnubin"
+          if [ -x /usr/bin/gnuinstall ]; then
+            ln -sf /usr/bin/gnuinstall "$HOME/gnubin/install"
+          fi
+          dpkg -L gnu-coreutils 2>/dev/null | grep -E '^/usr/bin/gnu[^/]+$' | while read -r bin; do
+            name=${bin##*/}
+            name=${name#gnu}
+            [ -n "$name" ] && ln -sf "$bin" "$HOME/gnubin/$name"
+          done
+          "$HOME/gnubin/install" --version | head -n1
+          "$HOME/gnubin/install" --version | grep GNU
+          echo "$HOME/gnubin" >> "$GITHUB_PATH"
+
       - name: Download OpenWrt SDK
         run: |
           BASE="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${{ matrix.target }}/${{ matrix.subtarget }}"
@@ -49,19 +78,31 @@ jobs:
         run: |
           mkdir -p sdk/package
           cp -r package/aic8800d80 sdk/package/aic8800d80
+          # Rebuilding from a different driver ref (e.g. legacy-mcu1) is useful
+          # for chip_mcu_id=1 hardware; rewrite the pin in the SDK copy only.
+          ref="${{ inputs.driver_ref }}"
+          if [ -n "$ref" ]; then
+            sha=$(git ls-remote https://github.com/shenmintao/aic8800d80.git "$ref" | head -n1 | cut -f1)
+            test -n "$sha"
+            echo "Building driver ref '$ref' at $sha"
+            sed -i "s/^PKG_SOURCE_VERSION:=.*/PKG_SOURCE_VERSION:=$sha/" sdk/package/aic8800d80/Makefile
+            sed -i "s/^PKG_SOURCE_DATE:=.*/PKG_SOURCE_DATE:=$(date -u +%F)/" sdk/package/aic8800d80/Makefile
+          fi
 
       - name: Configure
         run: |
           cd sdk
+          rm -rf tmp
           make defconfig
           cat >> .config <<'EOF'
-          CONFIG_PACKAGE_kmod-cfg80211=y
-          CONFIG_PACKAGE_kmod-mac80211=y
-          CONFIG_PACKAGE_kmod-usb-core=y
+          CONFIG_PACKAGE_kmod-cfg80211=m
+          CONFIG_PACKAGE_kmod-mac80211=m
+          CONFIG_PACKAGE_kmod-usb-core=m
           CONFIG_PACKAGE_kmod-aic8800d80=m
           CONFIG_PACKAGE_aic8800d80-firmware=m
           EOF
           make defconfig
+          grep -E '^CONFIG_PACKAGE_(kmod-(cfg80211|mac80211|usb-core|aic8800d80)|aic8800d80-firmware)=m$' .config
 
       - name: Build mac80211 backports
         run: |
@@ -78,6 +119,7 @@ jobs:
           mkdir -p out
           find sdk/bin -type f -name '*aic8800*.ipk' -exec cp -v {} out/ \;
           ls -l out
+          test -n "$(ls -A out)"
 
       - name: Upload packages
         uses: actions/upload-artifact@v7
@@ -90,4 +132,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" out/*.ipk --generate-notes --verify-tag
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            && gh release upload "$GITHUB_REF_NAME" out/*.ipk --clobber \
+            || gh release create "$GITHUB_REF_NAME" out/*.ipk --generate-notes --verify-tag
