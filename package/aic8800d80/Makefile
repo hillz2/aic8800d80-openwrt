@@ -35,8 +35,6 @@ include $(INCLUDE_DIR)/package.mk
 define KernelPackage/aic8800d80
   SUBMENU:=Wireless Drivers
   TITLE:=AIC8800D80 USB Wi-Fi driver
-  DESCRIPTION:=Out-of-tree driver for AIC8800D80 based USB Wi-Fi adapters \
-	(Tenda U11, AX913B and compatible AIC8800 boards).
   DEPENDS:=+kmod-cfg80211 +kmod-mac80211 +kmod-usb-core +aic8800d80-firmware
   FILES:= \
 	$(PKG_BUILD_DIR)/drivers/aic8800/aic_load_fw/aic_load_fw.ko \
@@ -44,6 +42,11 @@ define KernelPackage/aic8800d80
 	$(PKG_BUILD_DIR)/drivers/aic8800/aic_zlp_quirk/aic_zlp_quirk.ko
   # aic8800_fdrv depends on aic_load_fw, so load the loader first.
   AUTOLOAD:=$(call AutoProbe,aic_load_fw aic8800_fdrv)
+endef
+
+define KernelPackage/aic8800d80/description
+ Out-of-tree driver for AIC8800D80 based USB Wi-Fi adapters
+ (Tenda U11, AX913B and compatible AIC8800 boards).
 endef
 
 NOSTDINC_FLAGS := \

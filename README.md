@@ -14,8 +14,8 @@ GL.iNet 6416 and other ath79 routers with a USB port.
 | `kmod-aic8800d80` | `aic8800_fdrv`, `aic_load_fw`, `aic_zlp_quirk` kernel modules |
 | `aic8800d80-firmware` | all `aic8800*` firmware from the upstream `fw/` tree |
 
-`kmod-aic8800d80` depends on `kmod-cfg80211`, `kmod-usb-core` and the firmware
-package.
+`kmod-aic8800d80` depends on `kmod-cfg80211`, `kmod-mac80211`,
+`kmod-usb-core` and the firmware package.
 
 ## Build
 
@@ -24,25 +24,31 @@ workflow** builds the packages. The `.ipk` files are uploaded as workflow
 artifacts. Pushing a tag additionally attaches them to a GitHub Release.
 
 The build uses the official OpenWrt SDK for the target, so the module vermagic
-matches the release kernel (6.6.104 for 24.10.3). It builds the mac80211
-backports first, then compiles the driver against those headers with
+matches the release kernel (6.6.104 for 24.10.3). The 24.10.3 SDK ships no
+wireless stack at all — no `package/kernel/mac80211`, no staged mac80211
+headers and no prebuilt `kmod-cfg80211`/`kmod-mac80211` `.ipk` files — so the
+workflow checks out `package/kernel/mac80211` from the matching `v24.10.3` tag,
+builds it, and then compiles the driver against those headers with
 `CFG80211_VERSION=6.12.44` (the backports version in 24.10.3).
 
 ## Install on the router
 
-Download the two `.ipk` files from the workflow artifact (or release), then:
+Download the `.ipk` files from the workflow artifact (or release). The artifact
+also contains the matching `kmod-cfg80211`, `kmod-mac80211` and
+`kmod-usb-core` builds, which are useful if your router image lacks them:
 
 ```sh
 opkg update
-opkg install kmod-cfg80211 kmod-mac80211 kmod-usb-core
-opkg install /tmp/kmod-aic8800d80_*.ipk /tmp/aic8800d80-firmware_*.ipk
+opkg install /tmp/kmod-cfg80211_*.ipk /tmp/kmod-mac80211_*.ipk /tmp/kmod-usb-core_*.ipk
+opkg install /tmp/aic8800d80-firmware_*.ipk /tmp/kmod-aic8800d80_*.ipk
 reboot
 ```
 
-`opkg` can also resolve the feed dependencies automatically:
+If your image already has the wireless stack, install only the driver and
+firmware:
 
 ```sh
-opkg install /tmp/kmod-aic8800d80_*.ipk /tmp/aic8800d80-firmware_*.ipk
+opkg install /tmp/aic8800d80-firmware_*.ipk /tmp/kmod-aic8800d80_*.ipk
 ```
 
 Plug the adapter in and check:
@@ -63,8 +69,11 @@ iw dev
 - The Bluetooth ZLP quirk (`aic_zlp_quirk`) needs `CONFIG_KPROBES`, which stock
   OpenWrt 24.10.3 does not enable. It is not auto-loaded; Wi-Fi is unaffected.
 - If the driver log reports `chip_mcu_id=1`, upstream requires the
-  `legacy-mcu1` branch. Change `PKG_SOURCE_VERSION` (and `PKG_SOURCE_DATE`) in
-  `package/aic8800d80/Makefile` to a commit from that branch.
+  `legacy-mcu1` branch. Run **Actions → build → Run workflow** with
+  `driver_ref: legacy-mcu1`, or change `PKG_SOURCE_VERSION` (and
+  `PKG_SOURCE_DATE`) in both `package/aic8800d80/Makefile` and
+  `package/aic8800d80-firmware/Makefile` to a commit from that branch — the
+  matched firmware is part of that branch.
 
 ## Adding more targets
 
