@@ -46,23 +46,6 @@ define KernelPackage/aic8800d80
   AUTOLOAD:=$(call AutoProbe,aic_load_fw aic8800_fdrv)
 endef
 
-define Package/aic8800d80-firmware
-  SECTION:=firmware
-  CATEGORY:=Firmware
-  TITLE:=AIC8800 firmware
-  PKGARCH:=all
-endef
-
-define Package/aic8800d80-firmware/description
- Firmware blobs for the AIC8800 family (aic8800, aic8800D80, aic8800D80N,
- aic8800D80X2, aic8800DC, aic8800DLN) used by kmod-aic8800d80.
-endef
-
-define Package/aic8800d80-firmware/install
-	$(INSTALL_DIR) $(1)/lib/firmware
-	$(CP) $(PKG_BUILD_DIR)/fw/aic8800* $(1)/lib/firmware/
-endef
-
 NOSTDINC_FLAGS := \
 	$(KERNEL_NOSTDINC_FLAGS) \
 	-I$(STAGING_DIR)/usr/include/mac80211-backport/uapi \
@@ -81,4 +64,3 @@ define Build/Compile
 endef
 
 $(eval $(call KernelPackage,aic8800d80))
-$(eval $(call BuildPackage,aic8800d80-firmware))

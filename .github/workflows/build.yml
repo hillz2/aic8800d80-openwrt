@@ -88,6 +88,7 @@ jobs:
           cp -r "$RUNNER_TEMP/openwrt/package/kernel/mac80211" sdk/package/kernel/mac80211
 
           cp -r package/aic8800d80 sdk/package/aic8800d80
+          cp -r package/aic8800d80-firmware sdk/package/aic8800d80-firmware
 
           # Rebuilding from a different driver ref (e.g. legacy-mcu1) is useful
           # for chip_mcu_id=1 hardware; rewrite the pin in the SDK copy only.
@@ -138,6 +139,7 @@ jobs:
         run: |
           cd sdk
           make package/aic8800d80/compile V=s -j"$(nproc)"
+          make package/aic8800d80-firmware/compile V=s -j"$(nproc)"
 
       - name: Collect packages
         run: |
