@@ -22,8 +22,10 @@ PKG_SOURCE_DATE:=2026-11-20
 
 PKG_BUILD_PARALLEL:=1
 
-# OpenWrt 24.10.3 ships mac80211 backports 6.12.44 on Linux 6.6.
-AIC_CFG80211_VERSION:=6.12.44
+# OpenWrt 25.12.6 ships mac80211 backports 6.18.55 on Linux 6.12.
+# This must match PKG_VERSION in the package/kernel/mac80211 Makefile that CI
+# checks out for the same tag; the workflow prints both for verification.
+AIC_CFG80211_VERSION:=6.18.55
 
 # The mac80211 headers and Module.symvers must be staged before this package
 # is configured or compiled.

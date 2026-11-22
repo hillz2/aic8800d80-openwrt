@@ -27,7 +27,13 @@ jobs:
             target: ath79
             subtarget: generic
     env:
-      OPENWRT_VERSION: "24.10.3"
+      # 25.12 ships Linux 6.12 for ath79, so the driver's LINUX_VERSION_CODE
+      # gates finally agree with the cfg80211 backports version. On 24.10 the
+      # kernel is 6.6 while cfg80211 is 6.12, and 60+ call sites pick the
+      # wrong ABI.
+      OPENWRT_VERSION: "25.12.6"
+      # 25.12 builds .apk by default (CONFIG_USE_APK=y); 24.10 built .ipk.
+      PKG_EXT: apk
 
     steps:
       - name: Checkout
@@ -77,7 +83,7 @@ jobs:
         run: |
           # The SDK ships no wireless stack: package/kernel/mac80211 is absent,
           # staging_dir has no mac80211 headers and there are no prebuilt
-          # kmod-cfg80211/kmod-mac80211 .ipk files. Fetch the package from the
+          # kmod-cfg80211/kmod-mac80211 packages. Fetch the package from the
           # matching OpenWrt tag so the backport headers and Module.symvers the
           # driver needs are built from the same source release.
           git clone --quiet --depth 1 --branch "v${OPENWRT_VERSION}" \
@@ -97,13 +103,15 @@ jobs:
             sha=$(git ls-remote https://github.com/shenmintao/aic8800d80.git "$ref" | head -n1 | cut -f1)
             test -n "$sha"
             echo "Building driver ref '$ref' at $sha"
-            sed -i "s/^PKG_SOURCE_VERSION:=.*/PKG_SOURCE_VERSION:=$sha/" sdk/package/aic8800d80/Makefile
-            sed -i "s/^PKG_SOURCE_DATE:=.*/PKG_SOURCE_DATE:=$(date -u +%F)/" sdk/package/aic8800d80/Makefile
+            for mk in sdk/package/aic8800d80/Makefile sdk/package/aic8800d80-firmware/Makefile; do
+              sed -i "s/^PKG_SOURCE_VERSION:=.*/PKG_SOURCE_VERSION:=$sha/" "$mk"
+              sed -i "s/^PKG_SOURCE_DATE:=.*/PKG_SOURCE_DATE:=$(date -u +%F)/" "$mk"
+            done
           fi
 
           ls sdk/package/kernel/mac80211/Makefile
-          grep -m1 '^PKG_VERSION:=' sdk/package/kernel/mac80211/Makefile
-          grep -m1 '^AIC_CFG80211_VERSION:=' sdk/package/aic8800d80/Makefile
+          echo "mac80211 PKG_VERSION: $(grep -m1 '^PKG_VERSION:=' sdk/package/kernel/mac80211/Makefile)"
+          echo "driver CFG80211 version: $(grep -m1 '^AIC_CFG80211_VERSION:=' sdk/package/aic8800d80/Makefile)"
 
       - name: Configure
         run: |
@@ -111,6 +119,7 @@ jobs:
           rm -rf tmp
           make defconfig
           cat >> .config <<'EOF'
+          CONFIG_USE_APK=y
           CONFIG_PACKAGE_kmod-cfg80211=y
           CONFIG_PACKAGE_kmod-mac80211=y
           CONFIG_PACKAGE_kmod-usb-core=y
@@ -125,6 +134,11 @@ jobs:
             }
           done
           grep -E '^CONFIG_PACKAGE_(kmod-(cfg80211|mac80211|usb-core|aic8800d80)|aic8800d80-firmware)=' .config
+          # Package format decides the artifact extension; keep it explicit.
+          grep -q '^CONFIG_USE_APK=y' .config || {
+            echo "ERROR: CONFIG_USE_APK=y was not set, artifact extension would differ" >&2
+            exit 1
+          }
 
       - name: Build wireless stack
         run: |
@@ -145,11 +159,11 @@ jobs:
         run: |
           mkdir -p out
           for pkg in kmod-cfg80211 kmod-mac80211 kmod-usb-core kmod-aic8800d80 aic8800d80-firmware; do
-            found=$(find sdk/bin -type f -name "${pkg}_*.ipk" | head -n1)
+            found=$(find sdk/bin -type f \( -name "${pkg}_*.ipk" -o -name "${pkg}-*.apk" \) | head -n1)
             if [ -n "$found" ]; then
               cp -v "$found" out/
             else
-              echo "WARNING: no .ipk produced for ${pkg}"
+              echo "WARNING: no package produced for ${pkg}"
             fi
           done
           ls -l out
@@ -159,7 +173,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: aic8800d80-${{ env.OPENWRT_VERSION }}-${{ matrix.name }}
-          path: out/*.ipk
+          path: |
+            out/*.apk
+            out/*.ipk
           if-no-files-found: error
 
       - name: Attach packages to release
@@ -168,5 +184,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
-            && gh release upload "$GITHUB_REF_NAME" out/*.ipk --clobber \
-            || gh release create "$GITHUB_REF_NAME" out/*.ipk --generate-notes --verify-tag
+            && gh release upload "$GITHUB_REF_NAME" out/*.apk out/*.ipk --clobber \
+            || gh release create "$GITHUB_REF_NAME" out/*.apk out/*.ipk --generate-notes --verify-tag
