@@ -1,0 +1,54 @@
+name: sdk-inspect
+
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      OPENWRT_VERSION: "24.10.3"
+    steps:
+      - name: Download SDK
+        run: |
+          BASE="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/ath79/generic"
+          SDK=$(wget -qO- "$BASE/" | grep -oE 'openwrt-sdk-[^"]*Linux-x86_64\.tar\.zst' | head -n1)
+          wget -q "$BASE/$SDK"
+          tar --zstd -xf "$SDK"
+          mv "${SDK%.tar.zst}" sdk
+
+      - name: What is in package/
+        run: |
+          echo "=== sdk/package top level ==="
+          ls sdk/package
+          echo "=== sdk/package/kernel ==="
+          ls sdk/package/kernel
+          echo "=== any mac80211 anywhere ==="
+          find sdk -maxdepth 5 -name 'mac80211*' -not -path '*/build_dir/*' | head -20
+
+      - name: What is prebuilt in bin/
+        run: |
+          echo "=== bin tree ==="
+          find sdk/bin -maxdepth 4 -type d | head -20
+          echo "=== cfg80211/mac80211 ipk ==="
+          find sdk/bin -name '*cfg80211*' -o -name '*mac80211*' | head -20
+
+      - name: Staged headers
+        run: |
+          echo "=== staging_dir ==="
+          ls sdk/staging_dir
+          echo "=== usr/include ==="
+          ls sdk/staging_dir/target-*/usr/include 2>/dev/null | head -40
+          echo "=== mac80211-backport? ==="
+          ls -d sdk/staging_dir/target-*/usr/include/mac80211* 2>/dev/null || echo "(none)"
+          echo "=== autoconf.h? ==="
+          ls sdk/staging_dir/target-*/usr/include/mac80211-backport/backport/autoconf.h 2>/dev/null || echo "(none)"
+
+      - name: Feeds and kernel tree
+        run: |
+          echo "=== feeds.conf ==="
+          cat sdk/feeds.conf 2>/dev/null || echo "(none)"
+          echo "=== kernel build dir ==="
+          ls sdk/build_dir/target-*/linux-* 2>/dev/null | head || echo "(no kernel build dir)"
+          echo "=== symvers ==="
+          find sdk/build_dir -maxdepth 4 -name 'symvers' -type d 2>/dev/null || echo "(none)"
