@@ -72,8 +72,8 @@ your device first:
 
 1. Download from
    <https://downloads.openwrt.org/releases/25.12.6/targets/ath79/generic/>
-   the `*-sysupgrade.bin` for your model (e.g. `glinet_gl-ar750`-style naming —
-   for the GL.iNet 6416 look for `glinet_gl-*6416*`).
+   the `*-sysupgrade.bin` for your model. For the GL.iNet 6416 that is
+   exactly `openwrt-25.12.6-ath79-generic-glinet_6416-squashfs-sysupgrade.bin`.
 2. Back up your config: **System → Backup / Flash Firmware → Generate archive**.
 3. Flash it via **System → Backup / Flash Firmware → Flash image**, and
    **untick "Keep settings"** — 24.10 → 25.12 is a major upgrade and keeping
@@ -93,25 +93,33 @@ Or download them directly on the router:
 ```sh
 cd /tmp
 BASE=https://github.com/hillz2/aic8800d80-openwrt/releases/download/v25.12.6-ath79-generic
-wget -O - "$BASE" 2>/dev/null | grep -o 'href="[^"]*\.apk"' | cut -d'"' -f2 | while read -r f; do
-  wget "$BASE/$(basename "$f")"
+for f in \
+  aic8800d80-firmware-2026.11.20.1a2ce4e3-r1.apk \
+  kmod-aic8800d80-6.12.112.2026.11.20.1a2ce4e3-r1.apk \
+  kmod-cfg80211-6.12.112.6.18.55-r2.apk \
+  kmod-mac80211-6.12.112.6.18.55-r2.apk \
+  kmod-usb-core-6.12.112-r1.apk
+do
+  wget "$BASE/$f" || echo "FAILED: $f"
 done
 ls -1 *.apk
 ```
 
-You should see:
+You should end up with these five files:
 
 ```
-aic8800d80-firmware-2026.11.20~1a2ce4e3-r1.apk
-kmod-aic8800d80-6.12.112.2026.11.20~1a2ce4e3-r1.apk
+aic8800d80-firmware-2026.11.20.1a2ce4e3-r1.apk
+kmod-aic8800d80-6.12.112.2026.11.20.1a2ce4e3-r1.apk
 kmod-cfg80211-6.12.112.6.18.55-r2.apk
 kmod-mac80211-6.12.112.6.18.55-r2.apk
 kmod-usb-core-6.12.112-r1.apk
 ```
 
-> `apk` on OpenWrt ignores `~` and `.` differently from the filename above —
-> always install with a glob (`kmod-aic8800d80-*.apk`) rather than typing the
-> full name.
+> **Note the dots.** The build produces `2026.11.20~1a2ce4e3` (with a `~`), but
+> GitHub rewrites `~` to `.` in release asset names, so the released files use
+> `2026.11.20.1a2ce4e3`. That is only a filename difference; the package version
+> recorded inside the `.apk` is unchanged. Always install with a glob
+> (`kmod-aic8800d80-*.apk`) rather than typing the version by hand.
 
 ### Step 2 — Decide whether you need the wireless stack packages
 
