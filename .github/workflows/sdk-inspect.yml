@@ -17,38 +17,30 @@ jobs:
           tar --zstd -xf "$SDK"
           mv "${SDK%.tar.zst}" sdk
 
-      - name: What is in package/
+      - name: SDK root layout
         run: |
-          echo "=== sdk/package top level ==="
-          ls sdk/package
-          echo "=== sdk/package/kernel ==="
-          ls sdk/package/kernel
-          echo "=== any mac80211 anywhere ==="
-          find sdk -maxdepth 5 -name 'mac80211*' -not -path '*/build_dir/*' | head -20
+          echo "=== sdk root ==="
+          ls -la sdk
+          echo "=== sdk/target ==="
+          ls sdk/target 2>/dev/null || echo "(no target dir)"
+          echo "=== kernel build dir contents ==="
+          ls -la sdk/build_dir/target-*/ | head -20
+          echo "=== linux dir ==="
+          ls -la sdk/build_dir/target-*/linux-* | head -30
 
-      - name: What is prebuilt in bin/
+      - name: Kernel config state
         run: |
-          echo "=== bin tree ==="
-          find sdk/bin -maxdepth 4 -type d | head -20
-          echo "=== cfg80211/mac80211 ipk ==="
-          find sdk/bin -name '*cfg80211*' -o -name '*mac80211*' | head -20
+          K=$(ls -d sdk/build_dir/target-*/linux-* | head -n1)
+          echo "K=$K"
+          for f in .config .config.set Module.symvers modules.order include/config/auto.conf include/generated/autoconf.h; do
+            if [ -e "$K/$f" ]; then echo "PRESENT $f"; else echo "MISSING $f"; fi
+          done
+          echo "=== cfg80211 in kernel config ==="
+          grep -E 'CONFIG_CFG80211|CONFIG_MAC80211|CONFIG_USB=' "$K/.config" 2>/dev/null || echo "(no .config)"
+          echo "=== vermagic ==="
+          cat "$K/.vermagic" 2>/dev/null || echo "(none)"
 
-      - name: Staged headers
+      - name: Does SDK build kernel target
         run: |
-          echo "=== staging_dir ==="
-          ls sdk/staging_dir
-          echo "=== usr/include ==="
-          ls sdk/staging_dir/target-*/usr/include 2>/dev/null | head -40
-          echo "=== mac80211-backport? ==="
-          ls -d sdk/staging_dir/target-*/usr/include/mac80211* 2>/dev/null || echo "(none)"
-          echo "=== autoconf.h? ==="
-          ls sdk/staging_dir/target-*/usr/include/mac80211-backport/backport/autoconf.h 2>/dev/null || echo "(none)"
-
-      - name: Feeds and kernel tree
-        run: |
-          echo "=== feeds.conf ==="
-          cat sdk/feeds.conf 2>/dev/null || echo "(none)"
-          echo "=== kernel build dir ==="
-          ls sdk/build_dir/target-*/linux-* 2>/dev/null | head || echo "(no kernel build dir)"
-          echo "=== symvers ==="
-          find sdk/build_dir -maxdepth 4 -name 'symvers' -type d 2>/dev/null || echo "(none)"
+          cd sdk
+          make help 2>/dev/null | grep -E 'target/linux|package/' | head -20 || true
