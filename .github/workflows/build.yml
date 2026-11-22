@@ -45,7 +45,7 @@ jobs:
           # Recent ubuntu-latest images ship uutils coreutils, whose `install`
           # does not identify as GNU and therefore fails OpenWrt's
           # prerequisite check. GNU coreutils is still installed under
-          # /usr/bin/gnu*, so expose it as a normal prefix.
+          # /usr/bin/gnu*, so expose it under a normal prefix.
           if install --version 2>/dev/null | grep -q GNU; then
             echo "host install is already GNU coreutils"
             exit 0
@@ -60,7 +60,6 @@ jobs:
             name=${name#gnu}
             [ -n "$name" ] && ln -sf "$bin" "$HOME/gnubin/$name"
           done
-          "$HOME/gnubin/install" --version | head -n1
           "$HOME/gnubin/install" --version | grep GNU
           echo "$HOME/gnubin" >> "$GITHUB_PATH"
 
@@ -74,10 +73,22 @@ jobs:
           tar --zstd -xf "$SDK"
           mv "${SDK%.tar.zst}" sdk
 
-      - name: Add package
+      - name: Add mac80211 and driver packages
         run: |
-          mkdir -p sdk/package
+          # The SDK ships no wireless stack: package/kernel/mac80211 is absent,
+          # staging_dir has no mac80211 headers and there are no prebuilt
+          # kmod-cfg80211/kmod-mac80211 .ipk files. Fetch the package from the
+          # matching OpenWrt tag so the backport headers and Module.symvers the
+          # driver needs are built from the same source release.
+          git clone --quiet --depth 1 --branch "v${OPENWRT_VERSION}" \
+            --filter=blob:none --sparse \
+            https://github.com/openwrt/openwrt.git "$RUNNER_TEMP/openwrt"
+          git -C "$RUNNER_TEMP/openwrt" sparse-checkout set package/kernel/mac80211
+          mkdir -p sdk/package/kernel
+          cp -r "$RUNNER_TEMP/openwrt/package/kernel/mac80211" sdk/package/kernel/mac80211
+
           cp -r package/aic8800d80 sdk/package/aic8800d80
+
           # Rebuilding from a different driver ref (e.g. legacy-mcu1) is useful
           # for chip_mcu_id=1 hardware; rewrite the pin in the SDK copy only.
           ref="${{ inputs.driver_ref }}"
@@ -89,36 +100,39 @@ jobs:
             sed -i "s/^PKG_SOURCE_DATE:=.*/PKG_SOURCE_DATE:=$(date -u +%F)/" sdk/package/aic8800d80/Makefile
           fi
 
+          ls sdk/package/kernel/mac80211/Makefile
+          grep -m1 '^PKG_VERSION:=' sdk/package/kernel/mac80211/Makefile
+          grep -m1 '^AIC_CFG80211_VERSION:=' sdk/package/aic8800d80/Makefile
+
       - name: Configure
         run: |
           cd sdk
           rm -rf tmp
           make defconfig
           cat >> .config <<'EOF'
-          CONFIG_PACKAGE_kmod-cfg80211=m
-          CONFIG_PACKAGE_kmod-mac80211=m
-          CONFIG_PACKAGE_kmod-usb-core=m
-          CONFIG_PACKAGE_kmod-aic8800d80=m
-          CONFIG_PACKAGE_aic8800d80-firmware=m
+          CONFIG_PACKAGE_kmod-cfg80211=y
+          CONFIG_PACKAGE_kmod-mac80211=y
+          CONFIG_PACKAGE_kmod-usb-core=y
+          CONFIG_PACKAGE_kmod-aic8800d80=y
+          CONFIG_PACKAGE_aic8800d80-firmware=y
           EOF
           make defconfig
           for sym in kmod-cfg80211 kmod-mac80211 kmod-usb-core kmod-aic8800d80 aic8800d80-firmware; do
-            grep -qE "^CONFIG_PACKAGE_${sym}=[my]$" .config || {
+            grep -qE "^CONFIG_PACKAGE_${sym}=[ym]$" .config || {
               echo "ERROR: CONFIG_PACKAGE_${sym} was not enabled" >&2
               exit 1
             }
           done
           grep -E '^CONFIG_PACKAGE_(kmod-(cfg80211|mac80211|usb-core|aic8800d80)|aic8800d80-firmware)=' .config
 
-      - name: Check staged wireless headers
+      - name: Build wireless stack
         run: |
-          # The SDK ships prebuilt kmod-cfg80211/kmod-mac80211 packages and the
-          # mac80211 backport headers they installed into staging_dir. There is
-          # no package/kernel/mac80211 build tree in the SDK.
-          set -x
-          ls -d sdk/staging_dir/target-*/usr/include/mac80211* || true
-          ls sdk/staging_dir/target-*/usr/include/mac80211-backport/backport/autoconf.h || true
-          ls sdk/build_dir/target-*/linux-*/symvers/ 2>/dev/null || true
+          cd sdk
+          make package/kernel/mac80211/compile V=s -j"$(nproc)"
+          # The driver builds against the staged backport headers and the
+          # mac80211 Module.symvers; fail here if either is missing.
+          test -f staging_dir/target-*/usr/include/mac80211-backport/backport/autoconf.h
+          ls build_dir/target-*/linux-*/symvers/
 
       - name: Build AIC8800D80 packages
         run: |
@@ -128,7 +142,14 @@ jobs:
       - name: Collect packages
         run: |
           mkdir -p out
-          find sdk/bin -type f -name '*aic8800*.ipk' -exec cp -v {} out/ \;
+          for pkg in kmod-cfg80211 kmod-mac80211 kmod-usb-core kmod-aic8800d80 aic8800d80-firmware; do
+            found=$(find sdk/bin -type f -name "${pkg}_*.ipk" | head -n1)
+            if [ -n "$found" ]; then
+              cp -v "$found" out/
+            else
+              echo "WARNING: no .ipk produced for ${pkg}"
+            fi
+          done
           ls -l out
           test -n "$(ls -A out)"
 
