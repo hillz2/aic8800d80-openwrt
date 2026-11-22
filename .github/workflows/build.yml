@@ -102,12 +102,23 @@ jobs:
           CONFIG_PACKAGE_aic8800d80-firmware=m
           EOF
           make defconfig
-          grep -E '^CONFIG_PACKAGE_(kmod-(cfg80211|mac80211|usb-core|aic8800d80)|aic8800d80-firmware)=m$' .config
+          for sym in kmod-cfg80211 kmod-mac80211 kmod-usb-core kmod-aic8800d80 aic8800d80-firmware; do
+            grep -qE "^CONFIG_PACKAGE_${sym}=[my]$" .config || {
+              echo "ERROR: CONFIG_PACKAGE_${sym} was not enabled" >&2
+              exit 1
+            }
+          done
+          grep -E '^CONFIG_PACKAGE_(kmod-(cfg80211|mac80211|usb-core|aic8800d80)|aic8800d80-firmware)=' .config
 
-      - name: Build mac80211 backports
+      - name: Check staged wireless headers
         run: |
-          cd sdk
-          make package/kernel/mac80211/compile V=s -j"$(nproc)"
+          # The SDK ships prebuilt kmod-cfg80211/kmod-mac80211 packages and the
+          # mac80211 backport headers they installed into staging_dir. There is
+          # no package/kernel/mac80211 build tree in the SDK.
+          set -x
+          ls -d sdk/staging_dir/target-*/usr/include/mac80211* || true
+          ls sdk/staging_dir/target-*/usr/include/mac80211-backport/backport/autoconf.h || true
+          ls sdk/build_dir/target-*/linux-*/symvers/ 2>/dev/null || true
 
       - name: Build AIC8800D80 packages
         run: |
