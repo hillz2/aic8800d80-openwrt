@@ -17,30 +17,29 @@ jobs:
           tar --zstd -xf "$SDK"
           mv "${SDK%.tar.zst}" sdk
 
-      - name: SDK root layout
+      - name: SDK README and Makefile
         run: |
-          echo "=== sdk root ==="
-          ls -la sdk
-          echo "=== sdk/target ==="
-          ls sdk/target 2>/dev/null || echo "(no target dir)"
-          echo "=== kernel build dir contents ==="
-          ls -la sdk/build_dir/target-*/ | head -20
-          echo "=== linux dir ==="
-          ls -la sdk/build_dir/target-*/linux-* | head -30
+          echo "=== README.md ==="
+          cat sdk/README.md
+          echo "=== Makefile ==="
+          cat sdk/Makefile
+          echo "=== feeds.conf.default ==="
+          cat sdk/feeds.conf.default
 
-      - name: Kernel config state
+      - name: target/linux contents
         run: |
-          K=$(ls -d sdk/build_dir/target-*/linux-* | head -n1)
-          echo "K=$K"
-          for f in .config .config.set Module.symvers modules.order include/config/auto.conf include/generated/autoconf.h; do
-            if [ -e "$K/$f" ]; then echo "PRESENT $f"; else echo "MISSING $f"; fi
-          done
-          echo "=== cfg80211 in kernel config ==="
-          grep -E 'CONFIG_CFG80211|CONFIG_MAC80211|CONFIG_USB=' "$K/.config" 2>/dev/null || echo "(no .config)"
-          echo "=== vermagic ==="
-          cat "$K/.vermagic" 2>/dev/null || echo "(none)"
+          echo "=== target/linux (depth 2) ==="
+          find sdk/target/linux -maxdepth 2 | head -40
+          echo "=== target/linux/ath79 ==="
+          ls sdk/target/linux/ath79 2>/dev/null || echo "(none)"
+          echo "=== generic config present? ==="
+          ls sdk/target/linux/generic/config-6.6 2>/dev/null || echo "(no generic config)"
 
-      - name: Does SDK build kernel target
+      - name: package/kernel/linux and package/Makefile
         run: |
-          cd sdk
-          make help 2>/dev/null | grep -E 'target/linux|package/' | head -20 || true
+          echo "=== package/kernel/linux ==="
+          ls sdk/package/kernel/linux
+          echo "=== package/kernel/linux/modules ==="
+          ls sdk/package/kernel/linux/modules 2>/dev/null | head -20
+          echo "=== package/Makefile ==="
+          cat sdk/package/Makefile
