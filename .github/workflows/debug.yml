@@ -1,0 +1,57 @@
+name: debug-host
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    env:
+      OPENWRT_VERSION: "24.10.3"
+    steps:
+      - name: Host tool diagnostics
+        run: |
+          echo "PATH=$PATH"
+          echo "--- command -v install ---"
+          command -v install || echo "install NOT FOUND"
+          echo "--- install --version ---"
+          install --version || echo "install --version FAILED"
+          echo "--- grep GNU ---"
+          install --version | grep GNU; echo "grep rc=$?"
+          echo "--- ls ---"
+          ls -l /usr/bin/install /bin/install 2>&1 || true
+          echo "--- os ---"
+          cat /etc/os-release | head -3
+
+      - name: Download SDK
+        run: |
+          BASE="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/ath79/generic"
+          SDK=$(wget -qO- "$BASE/" | grep -oE 'openwrt-sdk-[^"]*Linux-x86_64\.tar\.zst' | head -n1)
+          test -n "$SDK"
+          echo "SDK=$SDK" >> "$GITHUB_ENV"
+          wget -q "$BASE/$SDK"
+          echo "--- tarball entries matching host/bin/install ---"
+          tar --zstd -tf "$SDK" | grep -E 'staging_dir/host/bin/install$' || echo "(none)"
+          tar --zstd -xf "$SDK"
+          mv "${SDK%.tar.zst}" sdk
+
+      - name: Inspect staged install
+        run: |
+          ls -ld sdk/staging_dir/host/bin || true
+          ls -l sdk/staging_dir/host/bin/install 2>&1 || echo "(no host/bin/install)"
+          file sdk/staging_dir/host/bin/install 2>&1 || true
+
+      - name: Try defconfig as-is
+        run: |
+          cd sdk
+          make defconfig 2>&1 | tail -20
+
+      - name: Retry with explicit GNU install symlink
+        if: always()
+        run: |
+          cd sdk
+          mkdir -p staging_dir/host/bin
+          ln -sf "$(command -v install)" staging_dir/host/bin/install
+          ls -l staging_dir/host/bin/install
+          make defconfig 2>&1 | tail -20
+          grep -E '^CONFIG_PACKAGE_kmod-mac80211|^CONFIG_PACKAGE_kmod-cfg80211' .config || true

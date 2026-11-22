@@ -34,12 +34,12 @@ include $(INCLUDE_DIR)/package.mk
 define KernelPackage/aic8800d80
   SUBMENU:=Wireless Drivers
   TITLE:=AIC8800D80 USB Wi-Fi driver (Tenda U11, AX913B)
-  DEPENDS:=+kmod-cfg80211 +kmod-usb-core +@USB_SUPPORT +aic8800d80-firmware
+  DEPENDS:=+kmod-cfg80211 +kmod-mac80211 +kmod-usb-core +@USB_SUPPORT +aic8800d80-firmware
   FILES:= \
 	$(PKG_BUILD_DIR)/drivers/aic8800/aic8800_fdrv/aic8800_fdrv.ko \
 	$(PKG_BUILD_DIR)/drivers/aic8800/aic_load_fw/aic_load_fw.ko \
 	$(PKG_BUILD_DIR)/drivers/aic8800/aic_zlp_quirk/aic_zlp_quirk.ko
-  AUTOLOAD:=$(call AutoProbe,aic8800_fdrv aic_load_fw)
+  AUTOLOAD:=$(call AutoProbe,aic_load_fw aic8800_fdrv)
 endef
 
 define Package/aic8800d80-firmware
@@ -54,6 +54,8 @@ define Package/aic8800d80-firmware/install
 	$(CP) $(PKG_BUILD_DIR)/fw/aic8800* $(1)/lib/firmware/
 endef
 
+
+
 NOSTDINC_FLAGS := \
 	$(KERNEL_NOSTDINC_FLAGS) \
 	-I$(STAGING_DIR)/usr/include/mac80211-backport/uapi \
@@ -66,7 +68,7 @@ define Build/Compile
 	+$(KERNEL_MAKE) $(PKG_JOBS) \
 		M="$(PKG_BUILD_DIR)/drivers/aic8800" \
 		NOSTDINC_FLAGS="$(NOSTDINC_FLAGS)" \
-		KBUILD_EXTRA_SYMBOLS="$(LINUX_DIR)/../symvers/mac80211.symvers" \
+		KBUILD_EXTRA_SYMBOLS="$(wildcard $(PKG_SYMVERS_DIR)/*.symvers)" \
 		CFG80211_VERSION=$(AIC_CFG80211_VERSION) \
 		modules
 endef
