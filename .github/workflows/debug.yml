@@ -9,41 +9,40 @@ jobs:
     env:
       OPENWRT_VERSION: "24.10.3"
     steps:
-      - name: Facts
+      - name: Inspect gnu-coreutils layout
         run: |
-          ls -l /usr/bin/install /usr/bin/ginstall 2>&1 || true
-          dpkg -S /usr/bin/install 2>&1 || true
-          dpkg -l | grep -E 'coreutils|rust-coreutils' || true
-          apt-cache policy coreutils | head -10
+          dpkg -L gnu-coreutils | grep -E '/install$|/bin/' | head -40
+          echo "--- /usr/libexec ---"
+          ls -l /usr/libexec/ 2>/dev/null | head -20
+          echo "--- alternatives ---"
+          ls -l /etc/alternatives/ 2>/dev/null | grep -i install | head
 
-      - name: Extract GNU install from coreutils .deb
+      - name: Download and extract gnu-coreutils deb
         run: |
-          set -x
+          set -eux
           mkdir -p /tmp/deb /tmp/gnu
           cd /tmp/deb
-          apt-get download coreutils 2>&1 | tail -3
+          apt-get download gnu-coreutils
           ls -l
-          for d in coreutils_*.deb; do dpkg-deb -x "$d" /tmp/gnu; done
-          find /tmp/gnu -name 'install' -o -name 'ginstall' | head
-          install_gnu=$(find /tmp/gnu -type f -name install | head -n1)
-          echo "GNU install: $install_gnu"
-          "$install_gnu" --version | head -2
+          dpkg-deb -x gnu-coreutils_*.deb /tmp/gnu
+          find /tmp/gnu -type f -name install
+          find /tmp/gnu -type f -name install -exec {} --version \; | head -2
 
-      - name: Verify prereq passes with GNU install first on PATH
+      - name: Prereq check with GNU install shim
         run: |
-          set -e
+          set -eux
+          gnu=$(find /tmp/gnu -type f -name install | head -n1)
+          mkdir -p /tmp/gnubin
+          ln -sf "$gnu" /tmp/gnubin/install
+          export PATH=/tmp/gnubin:$PATH
+          command -v install
+          install --version | head -1
           BASE="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/ath79/generic"
           SDK=$(wget -qO- "$BASE/" | grep -oE 'openwrt-sdk-[^"]*Linux-x86_64\.tar\.zst' | head -n1)
           test -n "$SDK"
           wget -q "$BASE/$SDK"
           tar --zstd -xf "$SDK"
           mv "${SDK%.tar.zst}" sdk
-          mkdir -p /tmp/gnubin
-          gnu=$(find /tmp/gnu -type f -name install | head -n1)
-          ln -sf "$gnu" /tmp/gnubin/install
-          export PATH=/tmp/gnubin:$PATH
-          command -v install
-          install --version | head -1
           cd sdk
-          make defconfig 2>&1 | tail -25
-          grep -E '^CONFIG_PACKAGE_kmod-(mac80211|cfg80211)|^CONFIG_TARGET_PROFILE' .config || true
+          make defconfig 2>&1 | tail -30
+          grep -E '^CONFIG_PACKAGE_kmod-(mac80211|cfg80211)|^CONFIG_TARGET_(PROFILE|SUBTARGET)' .config || true
