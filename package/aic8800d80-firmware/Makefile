@@ -39,4 +39,10 @@ define Package/aic8800d80-firmware/install
 	$(CP) $(PKG_BUILD_DIR)/fw/aic8800* $(1)/lib/firmware/
 endef
 
+# The source tree has no build system: it only ships firmware blobs, which the
+# install rule copies. Without this empty override the default Build/Compile
+# runs `make` and fails with "No targets specified and no makefile found".
+define Build/Compile
+endef
+
 $(eval $(call BuildPackage,aic8800d80-firmware))
