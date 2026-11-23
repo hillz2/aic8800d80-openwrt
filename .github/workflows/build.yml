@@ -232,8 +232,9 @@ jobs:
           find dist -type f \( -name '*.apk' -o -name '*.ipk' \) -print0 |
             while IFS= read -r -d '' f; do
               b=$(basename "$f")
-              [ -e "out/$b" ] && continue   # same file from another release
-              cp "$f" "out/$b"
+              if [ ! -e "out/$b" ]; then
+                cp "$f" "out/$b"
+              fi
             done
           ls -l out
           test -n "$(ls -A out)"
