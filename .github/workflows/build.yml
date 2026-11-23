@@ -190,12 +190,16 @@ jobs:
       - name: Collect packages
         run: |
           mkdir -p out
+          # Match "<pkg>_<version>.ipk" or "<pkg>-<version>.apk" exactly. A bare
+          # glob like "kmod-mac80211-*" would also match kmod-mac80211-hwsim, and
+          # the variant sorts first ("-" < "."), so anchor on a digit.
           for pkg in kmod-cfg80211 kmod-mac80211 kmod-usb-core kmod-aic8800d80 aic8800d80-firmware; do
-            found=$(find sdk/bin -type f \( -name "${pkg}_*.ipk" -o -name "${pkg}-*.apk" \) | head -n1)
+            found=$(find sdk/bin -type f \( -name "${pkg}_[0-9]*.ipk" -o -name "${pkg}-[0-9]*.apk" \) | sort | head -n1)
             if [ -n "$found" ]; then
               cp -v "$found" out/
             else
-              echo "WARNING: no package produced for ${pkg}"
+              echo "ERROR: no package produced for ${pkg}" >&2
+              exit 1
             fi
           done
           ls -l out
