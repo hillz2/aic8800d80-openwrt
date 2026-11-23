@@ -9,29 +9,55 @@ on:
         description: "Driver git ref to build (empty = the pinned commit; use legacy-mcu1 for chip_mcu_id=1)"
         required: false
         default: ""
+      releases:
+        description: "Space-separated OpenWrt 25.12.x releases to build (empty = all supported)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
 
 jobs:
+  # Kernel modules are vermagic-locked to the exact kernel build, so a single
+  # artifact can never install across OpenWrt point releases. Build one job per
+  # supported release instead. These are the 25.12.x releases and the kernel
+  # each ships for ath79 (modules only load when both match):
+  #   25.12.0 6.12.71   25.12.1 6.12.74   25.12.2 6.12.74   25.12.3 6.12.85
+  #   25.12.4 6.12.87   25.12.5 6.12.94   25.12.6 6.12.112
+  prepare:
+    name: plan
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - id: plan
+        env:
+          REQUESTED: ${{ inputs.releases }}
+        run: |
+          ALL="25.12.0 25.12.1 25.12.2 25.12.3 25.12.4 25.12.5 25.12.6"
+          want="${REQUESTED:-$ALL}"
+          entries=""
+          for v in $want; do
+            case " $ALL " in
+              *" $v "*) ;;
+              *) echo "ERROR: unsupported release '$v' (known: $ALL)" >&2; exit 1 ;;
+            esac
+            entries="$entries{\"name\":\"ath79-generic-$v\",\"version\":\"$v\",\"target\":\"ath79\",\"subtarget\":\"generic\"},"
+          done
+          echo "matrix={\"include\":[${entries%,}]}" >> "$GITHUB_OUTPUT"
+
   build:
     name: ${{ matrix.name }}
+    needs: prepare
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        # Packages are per target/subtarget, not per device. Add another entry
-        # here when building for a different OpenWrt target (e.g. ramips/mt7621).
-        include:
-          - name: ath79-generic
-            target: ath79
-            subtarget: generic
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
     env:
       # 25.12 ships Linux 6.12 for ath79, so the driver's LINUX_VERSION_CODE
       # gates finally agree with the cfg80211 backports version. On 24.10 the
       # kernel is 6.6 while cfg80211 is 6.12, and 60+ call sites pick the
       # wrong ABI.
-      OPENWRT_VERSION: "25.12.6"
       # 25.12 builds .apk by default (CONFIG_USE_APK=y); 24.10 built .ipk.
       PKG_EXT: apk
 
@@ -71,7 +97,7 @@ jobs:
 
       - name: Download OpenWrt SDK
         run: |
-          BASE="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${{ matrix.target }}/${{ matrix.subtarget }}"
+          BASE="https://downloads.openwrt.org/releases/${{ matrix.version }}/targets/${{ matrix.target }}/${{ matrix.subtarget }}"
           SDK=$(wget -qO- "$BASE/" | grep -oE 'openwrt-sdk-[^"]*Linux-x86_64\.tar\.zst' | head -n1)
           test -n "$SDK"
           echo "Using $SDK"
@@ -86,7 +112,7 @@ jobs:
           # kmod-cfg80211/kmod-mac80211 packages. Fetch the package from the
           # matching OpenWrt tag so the backport headers and Module.symvers the
           # driver needs are built from the same source release.
-          git clone --quiet --depth 1 --branch "v${OPENWRT_VERSION}" \
+          git clone --quiet --depth 1 --branch "v${{ matrix.version }}" \
             --filter=blob:none --sparse \
             https://github.com/openwrt/openwrt.git "$RUNNER_TEMP/openwrt"
           git -C "$RUNNER_TEMP/openwrt" sparse-checkout set package/kernel/mac80211
@@ -172,17 +198,39 @@ jobs:
       - name: Upload packages
         uses: actions/upload-artifact@v7
         with:
-          name: aic8800d80-${{ env.OPENWRT_VERSION }}-${{ matrix.name }}
+          name: aic8800d80-${{ matrix.name }}
           path: |
             out/*.apk
             out/*.ipk
           if-no-files-found: error
 
+  # Publishing is a separate job so the matrix jobs never race each other
+  # creating the release, and so the identical firmware package (which does not
+  # depend on the kernel) is only attached once.
+  publish:
+    name: publish
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all packages
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+
       - name: Attach packages to release
-        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          mkdir -p out
+          find dist -type f \( -name '*.apk' -o -name '*.ipk' \) -print0 |
+            while IFS= read -r -d '' f; do
+              b=$(basename "$f")
+              [ -e "out/$b" ] && continue   # same file from another release
+              cp "$f" "out/$b"
+            done
+          ls -l out
+          test -n "$(ls -A out)"
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
-            && gh release upload "$GITHUB_REF_NAME" out/*.apk out/*.ipk --clobber \
-            || gh release create "$GITHUB_REF_NAME" out/*.apk out/*.ipk --generate-notes --verify-tag
+            && gh release upload "$GITHUB_REF_NAME" out/* --clobber \
+            || gh release create "$GITHUB_REF_NAME" out/* --generate-notes --verify-tag

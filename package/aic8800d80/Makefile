@@ -4,8 +4,10 @@
 # Upstream: https://github.com/shenmintao/aic8800d80
 #
 # The driver is compiled against the mac80211 backports shipped by the target
-# release, not against the in-kernel wireless stack. Keep AIC_CFG80211_VERSION
-# in sync with package/kernel/mac80211's PKG_VERSION for that release.
+# release, not against the in-kernel wireless stack. The backports version
+# differs between point releases (6.18.7 on 25.12.0-25.12.3, 6.18.26 on
+# 25.12.4/25.12.5, 6.18.55 on 25.12.6), so it is read from the mac80211
+# package present in the tree instead of being hardcoded.
 
 include $(TOPDIR)/rules.mk
 
@@ -22,10 +24,13 @@ PKG_SOURCE_DATE:=2026-11-20
 
 PKG_BUILD_PARALLEL:=1
 
-# OpenWrt 25.12.6 ships mac80211 backports 6.18.55 on Linux 6.12.
-# This must match PKG_VERSION in the package/kernel/mac80211 Makefile that CI
-# checks out for the same tag; the workflow prints both for verification.
-AIC_CFG80211_VERSION:=6.18.55
+# mac80211 PKG_VERSION for whatever OpenWrt release this tree is built from.
+# CI places package/kernel/mac80211 in the SDK before configuration, so this
+# resolves for every supported 25.12.x release without editing the file.
+AIC_CFG80211_VERSION:=$(shell sed -n 's/^PKG_VERSION:=//p' $(TOPDIR)/package/kernel/mac80211/Makefile 2>/dev/null)
+ifeq ($(strip $(AIC_CFG80211_VERSION)),)
+  $(error mac80211 PKG_VERSION not found in $(TOPDIR)/package/kernel/mac80211/Makefile; the mac80211 package must be in the tree before this package is configured)
+endif
 
 # The mac80211 headers and Module.symvers must be staged before this package
 # is configured or compiled.
