@@ -17,6 +17,12 @@ on:
 permissions:
   contents: write
 
+# A newer push supersedes an older run. Tags are exempt so an in-flight publish
+# is never cancelled half way through creating a release.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
   # Kernel modules are vermagic-locked to the exact kernel build, so a single
   # artifact can never install across OpenWrt point releases. Build one job per

@@ -4,12 +4,15 @@ OpenWrt packages for the out-of-tree **AIC8800D80** USB Wi-Fi driver
 ([shenmintao/aic8800d80](https://github.com/shenmintao/aic8800d80)), built by
 GitHub Actions.
 
-Currently targets **OpenWrt 25.12.6 · ath79/generic (mips_24kc)**, e.g. the
-GL.iNet 6416 and other ath79 routers with a USB port.
+Supports **OpenWrt 25.12.x · ath79/generic (mips_24kc)**, e.g. the GL.iNet 6416
+and other ath79 routers with a USB port. A separate build is produced for every
+25.12.x point release, because kernel modules only load on the exact kernel
+they were compiled against.
 
 **Prebuilt packages:**
-[Releases → `v25.12.6-ath79-generic`](https://github.com/hillz2/aic8800d80-openwrt/releases/tag/v25.12.6-ath79-generic)
-— see [Install on OpenWrt 25.12](#install-on-openwrt-2512-tutorial).
+[**Releases**](https://github.com/hillz2/aic8800d80-openwrt/releases) — download
+the artifacts for *your* release (see the table in
+[Step 0](#step-0--check-that-your-router-matches)).
 
 > **Why 25.12 and not 24.10?** The driver picks cfg80211 APIs by comparing
 > `LINUX_VERSION_CODE` against the kernel it is built for, but it links
@@ -35,84 +38,108 @@ Pushing to any branch, opening a PR, or running **Actions → build → Run
 workflow** builds the packages. The packages are uploaded as workflow
 artifacts. Pushing a tag additionally attaches them to a GitHub Release.
 
+One job is built per OpenWrt 25.12.x release (25.12.0 … 25.12.6), because a
+kernel module is locked to the exact kernel build it was compiled against:
+
+| OpenWrt | kernel | mac80211 backports |
+|---|---|---|
+| 25.12.0 | 6.12.71 | 6.18.7 |
+| 25.12.1 | 6.12.74 | 6.18.7 |
+| 25.12.2 | 6.12.74 | 6.18.7 |
+| 25.12.3 | 6.12.85 | 6.18.7 |
+| 25.12.4 | 6.12.87 | 6.18.26 |
+| 25.12.5 | 6.12.94 | 6.18.26 |
+| 25.12.6 | 6.12.112 | 6.18.55 |
+
+To build only some of them, run the workflow manually and set `releases`, e.g.
+`25.12.2 25.12.6`.
+
 The build uses the official OpenWrt SDK for the target, so the module vermagic
-matches the release kernel (6.12 for 25.12.6). The SDK ships no wireless stack
-at all — no `package/kernel/mac80211`, no staged mac80211 headers and no
-prebuilt `kmod-cfg80211`/`kmod-mac80211` packages — so the workflow checks out
-`package/kernel/mac80211` from the matching `v25.12.6` tag, builds it, and then
-compiles the driver against those headers with `CFG80211_VERSION=6.18.55` (the
-backports version in 25.12.6).
+matches that release's kernel. The SDK ships no wireless stack at all — no
+`package/kernel/mac80211`, no staged mac80211 headers and no prebuilt
+`kmod-cfg80211`/`kmod-mac80211` packages — so the workflow checks out
+`package/kernel/mac80211` from the matching `v<release>` tag, builds it, and
+compiles the driver against those headers. `AIC_CFG80211_VERSION` is read from
+that mac80211 `Makefile`, so the driver's cfg80211 API gates always match the
+backports version it links against.
 
 ## Install on OpenWrt 25.12 (tutorial)
 
 Prebuilt packages are attached to
-[**Releases**](https://github.com/hillz2/aic8800d80-openwrt/releases). The
-example below uses the `v25.12.6-ath79-generic` release.
+[**Releases**](https://github.com/hillz2/aic8800d80-openwrt/releases). Pick the
+one built for your OpenWrt release — the kernel version must match exactly.
 
 ### Step 0 — Check that your router matches
 
-The packages are built for one specific target **and** one specific kernel
-build. Verify before downloading anything:
+Kernel modules only load on the exact kernel they were built against, so the
+packages are specific to both a target **and** an OpenWrt point release.
+Verify before downloading anything:
 
 ```sh
 . /etc/openwrt_release
-echo "$DISTRIB_RELEASE / $DISTRIB_TARGET"     # expect 25.12.6 / ath79/generic
-uname -r                                      # expect 6.12.112
+echo "$DISTRIB_RELEASE / $DISTRIB_TARGET"     # e.g. 25.12.2 / ath79/generic
+uname -r                                      # e.g. 6.12.74
 ```
 
-Both lines must match the release name (`v25.12.6-ath79-generic`, kernel
-`6.12.112`). If `DISTRIB_RELEASE` is `24.10.x` or anything else, the modules
-will be rejected by the kernel — see *Step 0b*.
+Then pick the row that matches `$DISTRIB_RELEASE`:
 
-#### Step 0b — If you are still on 24.10
+| OpenWrt | `uname -r` |
+|---|---|
+| 25.12.0 | 6.12.71 |
+| 25.12.1 | 6.12.74 |
+| 25.12.2 | 6.12.74 |
+| 25.12.3 | 6.12.85 |
+| 25.12.4 | 6.12.87 |
+| 25.12.5 | 6.12.94 |
+| 25.12.6 | 6.12.112 |
 
-These packages will **not** install on 24.10.x: it runs kernel 6.6, and these
-modules are vermagic-locked to 6.12.112. Flash the official 25.12.6 image for
-your device first:
+`DISTRIB_TARGET` must be `ath79/generic`. If your release is not in the table,
+or `DISTRIB_TARGET` differs, no package here will install — see *Step 0b*.
 
-1. Download from
-   <https://downloads.openwrt.org/releases/25.12.6/targets/ath79/generic/>
-   the `*-sysupgrade.bin` for your model. For the GL.iNet 6416 that is
-   exactly `openwrt-25.12.6-ath79-generic-glinet_6416-squashfs-sysupgrade.bin`.
-2. Back up your config: **System → Backup / Flash Firmware → Generate archive**.
-3. Flash it via **System → Backup / Flash Firmware → Flash image**, and
-   **untick "Keep settings"** — 24.10 → 25.12 is a major upgrade and keeping
-   old config across the `opkg` → `apk` switch is not supported.
-4. Reconnect and re-run the checks from Step 0.
+#### Step 0b — If your release is not covered
+
+There is no single build that works on every OpenWrt 25.x: the kernel rejects a
+module whose version string differs. Two options:
+
+- **Upgrade to a covered release.** For 24.10 and older, this is required — the
+  packages do not exist for kernel 6.6. Download the `*-sysupgrade.bin` for your
+  model from
+  <https://downloads.openwrt.org/releases/25.12.6/targets/ath79/generic/>
+  (for the GL.iNet 6416: `openwrt-25.12.6-ath79-generic-glinet_6416-squashfs-sysupgrade.bin`),
+  back up with **System → Backup / Flash Firmware → Generate archive**, flash
+  with **Flash image** and **untick "Keep settings"** (the `opkg` → `apk`
+  switch makes keeping 24.10 config unsupported), then re-run Step 0.
+- **Build it yourself** for your exact release with
+  **Actions → build → Run workflow** and `releases` set to your version (see
+  [Build](#build)).
 
 ### Step 1 — Download the packages
 
-Copy all five `.apk` files to the router, e.g. from your PC:
-
-```sh
-scp *.apk root@192.168.1.1:/tmp/
-```
-
-Or download them directly on the router:
+The filenames embed the kernel version, so they differ per release. Use the
+release matching your Step 0 row. For 25.12.2 / kernel 6.12.74:
 
 ```sh
 cd /tmp
-BASE=https://github.com/hillz2/aic8800d80-openwrt/releases/download/v25.12.6-ath79-generic
+BASE=https://github.com/hillz2/aic8800d80-openwrt/releases/download/<tag>
 for f in \
   aic8800d80-firmware-2026.11.20.1a2ce4e3-r1.apk \
-  kmod-aic8800d80-6.12.112.2026.11.20.1a2ce4e3-r1.apk \
-  kmod-cfg80211-6.12.112.6.18.55-r2.apk \
-  kmod-mac80211-6.12.112.6.18.55-r2.apk \
-  kmod-usb-core-6.12.112-r1.apk
+  kmod-aic8800d80-6.12.74.2026.11.20.1a2ce4e3-r1.apk \
+  kmod-cfg80211-6.12.74.6.18.7-r1.apk \
+  kmod-mac80211-6.12.74.6.18.7-r1.apk \
+  kmod-usb-core-6.12.74-r1.apk
 do
   wget "$BASE/$f" || echo "FAILED: $f"
 done
 ls -1 *.apk
 ```
 
-You should end up with these five files:
+The exact names are listed on the release page; copy them from there rather
+than retyping, since the kernel and backports versions both appear in them.
+Simplest is to download all five from the release page in a browser and
+`scp` them:
 
-```
-aic8800d80-firmware-2026.11.20.1a2ce4e3-r1.apk
-kmod-aic8800d80-6.12.112.2026.11.20.1a2ce4e3-r1.apk
-kmod-cfg80211-6.12.112.6.18.55-r2.apk
-kmod-mac80211-6.12.112.6.18.55-r2.apk
-kmod-usb-core-6.12.112-r1.apk
+```sh
+scp *.apk root@192.168.1.1:/tmp/
 ```
 
 > **Note the dots.** The build produces `2026.11.20~1a2ce4e3` (with a `~`), but
@@ -151,8 +178,9 @@ apk add --allow-untrusted /tmp/aic8800d80-firmware-*.apk /tmp/kmod-aic8800d80-*.
 
 `apk` resolves the rest of the dependencies from the package metadata
 (`kernel`, `kmod-cfg80211`, `kmod-mac80211`, `kmod-usb-core`,
-`aic8800d80-firmware`). If you see a dependency error naming `kernel=6.12.112`,
-your kernel does not match — go back to Step 0.
+`aic8800d80-firmware`). If you see a dependency error naming a `kernel=` version
+other than your `uname -r`, you downloaded the wrong release's packages — go
+back to Step 0.
 
 ### Step 4 — Reboot and verify
 
@@ -227,8 +255,9 @@ nothing else needs them.
 - The USB host controller modules for your router (e.g. `kmod-usb-ohci`,
   `kmod-usb-ehci`) must already be installed.
 - Packages are tied to the **exact kernel build**. They are built for OpenWrt
-  25.12.6 `ath79/generic`; installing them on a different release or custom
-  build will fail the vermagic check. Rebuild for the new release instead.
+  25.12.x `ath79/generic`; installing them on a different point release or
+  custom build will fail the vermagic check. Pick the matching release, or
+  rebuild for it.
 - The Bluetooth ZLP quirk (`aic_zlp_quirk`) needs `CONFIG_KPROBES`, which stock
   OpenWrt 25.12 does not enable. It is not auto-loaded; Wi-Fi is unaffected.
 - If the driver log reports `chip_mcu_id=1`, upstream requires the
@@ -240,25 +269,22 @@ nothing else needs them.
 
 ## Adding more targets
 
-Packages are built per target/subtarget, not per device. Add an entry to the
-matrix in `.github/workflows/build.yml`:
+Packages are built per target/subtarget, not per device. The matrix is
+generated by the `prepare` job from the `releases` input, and currently assumes
+`ath79/generic` for every release. To add another target, extend the `entries=`
+loop in `.github/workflows/build.yml` with a second entry per release, e.g.:
 
-```yaml
-matrix:
-  include:
-    - name: ath79-generic
-      target: ath79
-      subtarget: generic
-    - name: ramips-mt7621
-      target: ramips
-      subtarget: mt7621
+```sh
+entries="$entries{\"name\":\"ramips-mt7621-$v\",\"version\":\"$v\",\"target\":\"ramips\",\"subtarget\":\"mt7621\"},"
 ```
 
-For a different OpenWrt release, update `OPENWRT_VERSION` and
-`AIC_CFG80211_VERSION` (from that release's `package/kernel/mac80211`). Keep
-the target kernel and the backports version on the same major line if you can:
-a kernel older than the backports means the driver's `LINUX_VERSION_CODE`
-gates will disagree with the cfg80211 ABI it links against.
+To support a different OpenWrt release, add it to `ALL` in the same job (and to
+the tables in this README). `AIC_CFG80211_VERSION` is read from that release's
+`package/kernel/mac80211` automatically, so no other edit is needed.
+
+Keep the target kernel and the backports version on the same major line: a
+kernel older than the backports means the driver's `LINUX_VERSION_CODE` gates
+will disagree with the cfg80211 ABI it links against.
 
 ## License
 
