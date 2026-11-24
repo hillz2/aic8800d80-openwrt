@@ -12,7 +12,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=aic8800d80
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_LICENSE:=GPL-2.0-only
 PKG_LICENSE_FILES:=LICENSE
@@ -64,12 +64,20 @@ NOSTDINC_FLAGS := \
 	-I$(STAGING_DIR)/usr/include/mac80211 \
 	-include backport/backport.h
 
+# The driver's top-level Makefile force-enables CONFIG_PREALLOC_RX_SKB and
+# aicwf_prealloc_init() then allocates 1000 RX buffers of 20 KiB each (~20 MiB)
+# during module_init. On 32/64 MiB RAM ath79 routers this exhausts memory and
+# the watchdog resets the board as soon as aic_load_fw is loaded, even with no
+# adapter attached. Both sub-Makefiles default the option to "n" and the driver
+# has a complete runtime-allocation path, so turn preallocation off from the
+# command line (a command-line assignment overrides the driver's export).
 define Build/Compile
 	+$(KERNEL_MAKE) $(PKG_JOBS) \
 		M="$(PKG_BUILD_DIR)/drivers/aic8800" \
 		NOSTDINC_FLAGS="$(NOSTDINC_FLAGS)" \
 		KBUILD_EXTRA_SYMBOLS="$(wildcard $(PKG_SYMVERS_DIR)/*.symvers)" \
 		CFG80211_VERSION=$(AIC_CFG80211_VERSION) \
+		CONFIG_PREALLOC_RX_SKB=n \
 		modules
 endef
 
